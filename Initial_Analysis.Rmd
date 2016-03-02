@@ -1,0 +1,67 @@
+---
+title: "Initial Analysis"
+output: html_document
+---
+
+```{r warning=FALSE, message=FALSE}
+require(ggplot2)
+require(recommenderlab)
+```
+
+```{r}
+# Getting access to data from website
+data_web <- read.table("http://files.grouplens.org/datasets/movielens/ml-100k/u.data")
+str(data_web)
+
+# Getting access to data using recommenderlab package
+data(MovieLense)
+str(MovieLense)
+```
+
+```{r data visualization}
+data <- read.csv("unifiedMLDataMulti.csv")
+str(data)
+
+# age VS rating
+ggplot(data, aes(x=as.factor(rating),y=age)) +
+    geom_boxplot(aes(fill=as.factor(rating))) +
+    scale_fill_discrete(name="rating") 
+
+# rating VS gender
+gender.df <- as.data.frame(table(data$gender, data$rating))
+ggplot(gender.df, aes(x=Var1, y=Var2)) +
+   geom_tile(aes(fill = Freq), colour = "black") +
+   scale_fill_gradient(low = "white", high = "steelblue") +
+    xlab("gender") +
+    ylab("rating")
+
+# rating VS occupation
+occupation.df <- as.data.frame(table(data$occupation, data$rating))
+ggplot(occupation.df, aes(x=Var1, y=Var2)) +
+   geom_tile(aes(fill = Freq), colour = "black") +
+   scale_fill_gradient(low = "white", high = "steelblue") +
+    xlab("occupation") +
+    ylab("rating")
+
+# rating VS genre
+genre.df <- as.data.frame(table(data$genre, data$rating))
+ggplot(genre.df, aes(x=Var1, y=Var2)) +
+   geom_tile(aes(fill = Freq), colour = "black") +
+   scale_fill_gradient(low = "white", high = "steelblue") +
+    xlab("genre") +
+    ylab("rating")
+
+# age VS rating VS occupation
+ggplot(data, aes(x=as.factor(rating),y=age)) +
+    geom_boxplot(aes(fill=as.factor(rating))) +
+    scale_fill_discrete(name="rating") +
+    facet_wrap(~occupation)
+```
+
+- Younger people tend to rate lower.
+
+- Comparing with women, more men rate; and they rates at 4 most.
+
+- Comparing with other occupations, the number of students who rate is the largest; and students rates at 4 most.
+
+- Drama, comedy, action have more rates.
