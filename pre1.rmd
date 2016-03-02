@@ -1,0 +1,74 @@
+---
+title: "Recommender Systems Study Design"
+author: "Yaqi Zhou; Yanan Huo; Li Luo; Kejia Shi"
+date: "March 2, 2016"
+output: beamer_presentation
+---
+
+##Introduction & Key Questions
+
+1. Predicting ratings using algorithms in the `recommenerlab` package and other machine learning approaches;
+
+2. Comparing these methods.
+
+
+
+## Plan of Approach
+
+1) Data visualization and relationship exploration
+
+• Is there any relationship between rating and information about films, e.g. genre, as well as demographic variables, e.g. age, occupation, gender and zip_code?
+
+2) Approach 1: Rating prediction using R/recommenderlab package
+
+3) Approach 2: Rating prediction using other machine learning approaches
+
+4) Evaluation of rating predictions and method comparison
+
+
+
+
+## rating vs. age vs. occupation
+
+```{r,echo=FALSE,warning=FALSE,message=FALSE}
+library(recommenderlab)
+library(ggplot2)
+data<-read.csv("unifiedMLDataMulti.csv",head=T)
+ggplot(data, aes(x=as.factor(rating),y=age)) +
+    geom_boxplot(aes(fill=as.factor(rating))) +
+    scale_fill_discrete(name="rating") +
+    facet_wrap(~occupation)+xlab("rating")
+```
+
+
+## genre vs.occupation vs. rating
+
+```{r, echo=FALSE,message=FALSE,warning=FALSE}
+library(RColorBrewer)
+library(grid)
+library(plyr)
+library(dplyr)
+mlDat_genre_occup <- ddply(data, ~genre + occupation, summarize, mean_rating = mean(rating))
+heatMapPalette <- colorRampPalette(rev(brewer.pal(11, "RdBu")))
+goHeat2 <- ggplot(mlDat_genre_occup, aes(x = genre, y = occupation, fill = mean_rating))
+goHeat2 <- goHeat2 + geom_tile() + theme(axis.text.x = element_text(angle = 90, hjust = 1))
+goHeat2 <- goHeat2 +  scale_fill_gradientn(limits = c(2.5,4.6), colours = heatMapPalette(100))
+goHeat2 <- goHeat2 + theme(panel.background = element_rect(fill='darkgreen'), 
+                           panel.grid.major = element_blank(), 
+                           panel.grid.minor = element_blank())
+print(goHeat2)
+```
+
+## Normalization
+
+```{r,echo=FALSE,fig.align='center'}
+data(MovieLense)
+m<-normalize(MovieLense,method="Z-score")
+image(MovieLense,xlim=c(0,10),ylim=c(0,10),main="Image plot of unnormalized rating")
+```
+
+## Normalization
+
+```{r,echo=FALSE,fig.align='center'}
+image(m,xlim=c(0,10),ylim=c(0,10),main="Image plot of normalized rating")
+```
