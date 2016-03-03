@@ -1,4 +1,11 @@
-# 628 Project 2
-Recommendation System
+# Recommendation System
+ 
+STAT 628 Data Science Practicum
+
+Project 2
+
+Team Members: Yaqi Zhou; Yanan Huo; Li (Catherine) Luo; Kejia (KJ) Shi
+
+University of Wisconsin-Madison
 
 Feb 29, 2016
