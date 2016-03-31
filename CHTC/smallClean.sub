@@ -1,0 +1,19 @@
+# smallClean.sub
+
+universe = vanilla
+log = smallClean.log
+error = smallClean.err
+executable = smallClean.sh
+arguments = smallClean.R
+requirements = (OpSys== "LINUX") && (OpSysMajorVer == 6)
+output = smallClean.out
+
+should_transfer_files = YES
+when_to_transfer_output = ON_EXIT
+transfer_input_files = smallClean.R, u.data, u.user, u.genre, u.item
+
+request_cpus = 1
+request_memory = 4GB
+request_disk = 1GB
+
+queue
