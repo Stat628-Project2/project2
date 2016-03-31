@@ -189,7 +189,7 @@ for(j in 1:11) {
         } else {
             age_features[j,i] = sample(top,1)
         }
-        }
+    }
 }
 
 age_features[,1]=0:10
@@ -227,5 +227,342 @@ occupation_features<-as.data.frame(occupation_features)
 colnames(occupation_features) <-c("occupation", paste0("topic",1:10))
 
 write.csv(occupation_features,"occupation_features.csv",row.names=FALSE)
+
+# users' topics similarities
+
+topic <- read.csv("topics.csv", colClasses = "character")
+topic_similarity <- matrix(ncol=dim(topic)[1],nrow=dim(topic)[1])
+for (i in 1:(dim(topic)[1]-1)) {
+    for (j in (i+1):dim(topic)[1]) {
+        comb <- length(unique(unlist(unname(c(topic[i,-1],topic[j,-1])))))
+        inters <- length(intersect(as.vector(as.matrix(unname(topic[i,-1]))),as.vector(as.matrix(unname(topic[j,-1])))))
+        topic_similarity[i,j] <- inters/comb
+    }
+}
+
+for (i in 1:dim(topic)[1]) {
+    topic_similarity[i,i] <- 1
+}
+
+write.csv(topic_similarity, "topic_similarity.csv", row.names=FALSE)
+
+
+# determine alpha, beta
+agesim<- read.csv("age_similarity.csv")
+occsim<-read.csv("occupation_similarity.csv")
+gensim<-read.csv("sex_similarity.csv")
+diag(agesim) <- 0
+diag(occsim) <- 0
+diag(gensim) <- 0
+write.csv(agesim, "age_similarity.csv", row.names=FALSE)
+write.csv(occsim, "occupation_similarity.csv", row.names=FALSE)
+write.csv(gensim, "sex_similarity.csv", row.names=FALSE)
+
+agesim[1:3,1:3]
+set.seed(11)
+demosim_sample<-sample(1:dim(agesim)[1],size=1)
+sim_u<-as.numeric()
+sample_rating <- data %>%
+    filter(user_id == demosim_sample) %>%
+    select(user_id, item_id, rating) %>%
+    unique()
+p_a_bar <- mean(sample_rating$rating)
+K=60 # 10 is too small all sim=1, then no difference of choosing different alpha and beta
+
+p_b_bar <- numeric(length=K)
+S_a <- matrix(ncol=dim(item_attr)[1],nrow=1)
+data_mt <- as.numeric(data$movie_title)
+data$item_id <- data_mt
+mae_test<-matrix(ncol=8,nrow=8)
+mae_test<-as.data.frame(mae_test)
+colnames(mae_test)<-c(paste0("alpha=",(1:8)/10))
+rownames(mae_test)<-c(paste0("beta=",(1:8)/10))
+for(p in 1:8){
+    for(q in 1:(10-p-1)){
+        alpha<-p/10
+        beta<-q/10
+        # sample users' similarity with other users
+        # select the top K users based on similarity
+        for(k in 1:dim(agesim)[1]){
+            sim_u[k]<-alpha*agesim[demosim_sample,k]+beta*gensim[demosim_sample,k]+(1-alpha-beta)*occsim[demosim_sample,k]
+            neighbor_ind <- order(sim_u,decreasing=TRUE)[1:K]
+        }
+        # calculate p_b_bar for neighboring users
+        for (i in 1:length(neighbor_ind)) {
+            neigh_rating <- data %>%
+                filter(user_id == neighbor_ind[i]) %>%
+                select(user_id, item_id, rating) %>%
+                unique()
+            p_b_bar[i] <- mean(neigh_rating$rating)
+        }
+        # calculate S_a
+        for (h in 1:dim(item_attr)[1]) {
+            d <- data %>%
+                filter(user_id %in% neighbor_ind) %>%
+                select(item_id, user_id, rating) %>%
+                unique()
+            # select id for neighboring users who have ratings for item h
+            neighbor_ind_r <- d %>% 
+                filter(item_id == h) %>%
+                select(user_id) %>%
+                unname() %>%
+                as.matrix() %>%
+                as.numeric()
+            if (length(neighbor_ind_r)==0) {
+                S_a[h] <- p_a_bar
+            } else {
+                # select p_b_h
+                d_bh <- d %>%
+                    filter(user_id %in% neighbor_ind_r, item_id==h) %>%
+                    arrange(user_id)
+                # calculate p_b_bar_filter
+                p_b_bar_filter <- data %>%
+                    filter(user_id %in% neighbor_ind_r) %>%
+                    select(user_id, item_id, rating) %>%
+                    unique() %>%
+                    group_by(user_id) %>%
+                    mutate(pbbar=mean(rating)) %>%
+                    select(user_id, pbbar) %>%
+                    unique() %>%
+                    arrange(user_id)
+                
+                numerator = sim_u[sort(neighbor_ind_r)] %*% (d_bh$rating-p_b_bar_filter$pbbar)
+                S_a[h] <- p_a_bar + numerator/sum(sim_u[neighbor_ind])
+            }
+        }
+        #fill unrated items rating with 0 (use all ratings,the difference seems not clear, so only use ratings that the sample user rated)
+        #sample_rating_full<-matrix(nrow=length(S_a),ncol=3)
+        #sample_rating_full<-as.data.frame(sample_rating_full)
+        #colnames(sample_rating_full)<-c("use_id","item_id","rating")
+        #for (i in 1:length(S_a)) {
+        #if (!(i %in% sample_rating$item_id)){
+        #sample_rating_full[i,1] <- demosim_sample
+        #sample_rating_full[i,2] <- i
+        #sample_rating_full[i,3] <- 0
+        # }
+        #else{
+        #sample_rating_full[i,1] <- demosim_sample
+        #sample_rating_full[i,2] <- i
+        #sample_rating_full[i,3] <- sample_rating$rating[sample_rating$item_id==i]
+        #}
+        #}
+        ind_r<-sample_rating$item_id
+        pred_r<-S_a[ind_r]
+        real_r<-sample_rating$rating
+        #calculate mae
+        mae=sum(abs(real_r-pred_r))/length(real_r)
+        mae_test[q,p]=mae
+    }
+}
+write.csv(mae_test,"mae_test.csv")
+
+mae_test_demo <- read.csv("mae_test.csv")
+min(mae_test_demo[,-1],na.rm=TRUE)
+which(mae_test_demo == min(mae_test_demo[,-1],na.rm=TRUE), arr.ind=TRUE)
+
+beta_demo <- 0.1
+alpha_demo <-0.1
+sim_demo <- matrix(ncol=length(user_demo$user_id), nrow=length(user_demo$user_id))
+for (i in 1:length(user_demo$user_id)) {
+    for (j in 1:length(user_demo$user_id)) {
+        sim_demo[i,j] <- alpha_demo*agesim[i,j]+beta_demo*gensim[i,j]+(1-alpha_demo-beta_demo)*occsim[i,j]
+    }
+}
+
+sim_demo <- as.data.frame(sim_demo)
+colnames(sim_demo) <- paste0("U",1:length(user_demo$user_id))
+write.csv(sim_demo,"similarity_demo.csv", row.names=FALSE)
+
+# calculate users' overall similarities 
+
+sim_rating <- read.csv("similarity_user.csv")
+
+na.ind <- as.data.frame(which(is.na(sim_rating),arr.ind=TRUE))
+
+for (i in 1:dim(na.ind)[1]) {
+    if (is.na(sim_rating[na.ind[i,2], na.ind[i,1]])) {
+        sim_rating[na.ind[i,1], na.ind[i,2]] = 0
+    } else {
+        sim_rating[na.ind[i,1], na.ind[i,2]] = sim_rating[na.ind[i,2], na.ind[i,1]]
+    }
+}
+
+set.seed(27)
+
+overallsim_sample<-sample(1:dim(agesim)[1],size=1)
+
+sim_zi<-as.numeric()
+
+sample_rating_zi <- data %>%
+    filter(user_id == overallsim_sample) %>%
+    select(user_id, item_id, rating) %>%
+    unique()
+
+p_a_bar_zi <- mean(sample_rating_zi$rating)
+
+K=60 
+
+p_b_bar_zi <- numeric(length=K)
+S_b <- matrix(ncol=dim(item_attr)[1],nrow=1) # rating of user b for all items
+
+mae_test_zi <- matrix(ncol=8,nrow=8)
+mae_test_zi <- as.data.frame(mae_test_zi)
+colnames(mae_test_zi) <- c(paste0("alpha=",(1:8)/10))
+rownames(mae_test_zi) <- c(paste0("beta=",(1:8)/10))
+
+topic_similarity <- read.csv("topic_similarity.csv")
+sim_topics <- topic_similarity + t(topic_similarity)
+diag(sim_topics) <- 0
+
+for(p in 1:8){
+    for(q in 1:(10-p-1)){
+        alpha <- p/10
+        beta <- q/10
+        # sample users' similarity with other users
+        # select the top K users based on similarity
+        for(k in 1:length(user_demo$user_id)){
+            sim_zi[k] <- alpha*sim_demo[overallsim_sample,k]+beta*sim_topics[overallsim_sample,k]+(1-alpha-beta)*sim_rating[overallsim_sample,k]
+            neighbor_ind_zi <- order(sim_zi,decreasing=TRUE)[1:K]
+        }
+        # calculate p_b_bar for neighboring users
+        for (i in 1:length(neighbor_ind_zi)) {
+            neigh_rating_zi <- data %>%
+                filter(user_id == neighbor_ind_zi[i]) %>%
+                select(user_id, item_id, rating) %>%
+                unique()
+            p_b_bar_zi[i] <- mean(neigh_rating_zi$rating)
+        }
+        # calculate S_b
+        for (h in 1:dim(item_attr)[1]) {
+            d <- data %>%
+                filter(user_id %in% neighbor_ind_zi) %>%
+                select(item_id, user_id, rating) %>%
+                unique()
+            # select id for neighboring users who have ratings for item h
+            neighbor_ind_r <- d %>% 
+                filter(item_id == h) %>%
+                select(user_id) %>%
+                unname() %>%
+                as.matrix() %>%
+                as.numeric()
+            if (length(neighbor_ind_r)==0) {
+                S_b[h] <- p_a_bar_zi
+            } else {
+                # select p_b_h
+                d_bh <- d %>%
+                    filter(user_id %in% neighbor_ind_r, item_id==h) %>%
+                    arrange(user_id)
+                # calculate p_b_bar_filter
+                p_b_bar_filter <- data %>%
+                    filter(user_id %in% neighbor_ind_r) %>%
+                    select(user_id, item_id, rating) %>%
+                    unique() %>%
+                    group_by(user_id) %>%
+                    mutate(pbbar=mean(rating)) %>%
+                    select(user_id, pbbar) %>%
+                    unique() %>%
+                    arrange(user_id)
+                
+                numerator = sim_zi[sort(neighbor_ind_r)] %*% (d_bh$rating-p_b_bar_filter$pbbar)
+                S_b[h] <- p_a_bar + numerator/sum(sim_u[neighbor_ind_zi])
+            }
+        }
+        ind_r_zi <- sample_rating_zi$item_id
+        pred_r_zi <- S_b[ind_r]
+        real_r_zi <- sample_rating_zi$rating
+        #calculate mae
+        mae_zi <- sum(abs(real_r_zi-pred_r_zi))/length(real_r_zi)
+        mae_test_zi[q,p]=mae_zi
+    }
+}
+write.csv(mae_test_zi,"mae_test_zi.csv")
+
+min(mae_test_zi,na.rm=TRUE)
+which(mae_test_zi == min(mae_test_zi,na.rm=TRUE), arr.ind=TRUE)
+
+beta_total <- 0.5
+alpha_total <-0.4
+sim_total <- matrix(ncol=length(user_demo$user_id), nrow=length(user_demo$user_id))
+for (i in 1:length(user_demo$user_id)) {
+    for (j in 1:length(user_demo$user_id)) {
+        sim_total[i,j] <- alpha_total*sim_demo[i,j]+beta_total*sim_topics[i,j]+(1-alpha_total-beta_total)*sim_rating[i,j]
+    }
+}
+
+sim_total <- as.data.frame(sim_total)
+colnames(sim_total) <- paste0("U",1:length(user_demo$user_id))
+write.csv(sim_total,"similarity_hybrid_final.csv", row.names=FALSE)
+
+# predict for the old users
+
+set.seed(29)
+presim_old <- sample(1:length(user_demo$user_id),size=3)
+presim_old <- sort(presim_old)
+
+presim_data <- data %>%
+    filter(user_id %in% presim_old) %>%
+    select(user_id, rating) %>%
+    unique() 
+
+P_a_old <- presim_data %>%
+    group_by(user_id) %>%
+    summarise(ave_rating = mean(presim_data$rating))
+
+
+# calculate p_b_bar for neighboring users
+
+P_b_old <- data %>%
+    filter(user_id %in% presim_old) %>%
+    select(user_id, item_id, rating) %>%
+    unique() %>%
+    group_by(user_id) %>%
+    summarise(ave_rating=mean(rating))
+
+# calculate S_old
+S_old <- matrix(ncol=dim(item_attr)[1],nrow=length(presim_old))
+
+neighbor_ind_old <- matrix(ncol=K,nrow=length(presim_old))
+for (i in 1:length(presim_old)) {
+    neighbor_ind_old[i,] <- order(sim_total[presim_old[i],],decreasing=TRUE)[1:K]
+}
+
+for (i in 1:length(presim_old)) {
+    for (h in 1:dim(item_attr)[1]) {
+        d <- data %>%
+            filter(user_id %in% neighbor_ind_old[i,]) %>%
+            select(item_id, user_id, rating) %>%
+            unique()
+        # select id for neighboring users who have ratings for item h
+        neighbor_ind_r <- d %>% 
+            filter(item_id == h) %>%
+            select(user_id) %>%
+            unname() %>%
+            as.matrix() %>%
+            as.numeric()
+        if (length(neighbor_ind_r)==0) {
+            S_old[i,h] <- P_a_old$ave_rating[i]
+        } else {
+            # select p_b_h
+            d_bh <- d %>%
+                filter(user_id %in% neighbor_ind_r, item_id==h) %>%
+                arrange(user_id)
+            numerator = as.matrix(sim_total[presim_old[i],sort(neighbor_ind_r)]) %*% as.matrix(d_bh$rating-P_b_old$ave_rating[i])
+            S_old[i,h] <- P_a_old$ave_rating[i] + numerator/sum(sim_total[presim_old[i],sort(neighbor_ind_r)])
+        }
+    }
+}
+
+# Recommend 5 films for each user
+movie_recommend <- list()
+for (i in 1:length(presim_old)) {
+    item_recommend <- which(S_old[i,] %in% sort(S_old[i,], decreasing=TRUE)[1:10])
+    movie_recommend[[i]] <- as.character(item_uniq$movie_title[item_uniq$item_id %in% item_recommend])
+}
+ 
+# predict for the new users
+
+
+
+
 
 
