@@ -14,4 +14,6 @@ Contents:
 
 1. Research Plan
 2. Data visualization and initial analysis (Issues)
-3. First presentation slides
+3. Presentation slides series
+4. 20m dataset clean file
+5. CHTC briding
