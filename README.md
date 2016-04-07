@@ -17,3 +17,5 @@ Contents:
 3. Presentation slides series
 4. 20m dataset clean file
 5. CHTC briding
+6. Hybrid CF Algorithm Construction and Analysis
+7. Final Report
