@@ -1,4 +1,5 @@
 library(dplyr)
+library(ggplot2)
 library(reshape2)
 
 data <- read.csv("unifiedMLDataMulti.csv", header=TRUE)
@@ -37,10 +38,22 @@ age_group_det <- function(num) {
     }
 }
 
+age_division <- read.csv("age_group_division.csv")
+seg_p <- unique(age_division$point)[-11]
+seg_y <- seq(0,9)
+seg <- data.frame(seg_p, seg_y)
+
+p <- ggplot(data=age_division, aes(x=Age, y=Age.Group)) +
+    geom_segment(aes(yend=Age.Group, xend=xend)) +
+    scale_x_continuous(limits=c(min(age_division$Age),max(age_division$Age)),breaks=unique(age_division$xend)) + 
+    scale_y_continuous(limits=c(min(age_division$Age.Group),max(age_division$Age.Group)),breaks=unique(age_division$Age.Group))
+
+p + geom_point(data=seg, aes(y=seg_y,x=seg_p), size=1, shape=1)
+    
 age <- data.frame(u.age$age)
 u.age$age_group <- apply(age,1,age_group_det)
 
-u.num <- dim(u.sex)[1]
+u.num <- dim(u.age)[1]
 
 u.age.group <- u.age %>% 
     select(user_id, age_group) %>%
@@ -125,7 +138,7 @@ write.csv(r_num, "rating_count.csv", row.names=FALSE)
 
 # users' preference features
 
-gamma=10
+gamma=5
 topics <- matrix(ncol=gamma+1,nrow=dim(r_total)[1])
 for (i in 1: dim(r_total)[1]) {
     total_10 <- names(sort(r_total[i,-1],decreasing=TRUE)[1:gamma])
@@ -163,14 +176,22 @@ head(gender_topics)
 
 gender_features <- matrix(ncol=gamma+1,nrow=2)
 names(gender_topics)
-for (i in 2:11) {
-    gender_features[1,i] <- names(which(table(gender_topics$gender,gender_topics[,i])[1,]==max(table(gender_topics$gender,gender_topics[,i])[1,])))
-    gender_features[2,i] <- names(which(table(gender_topics$gender,gender_topics[,i])[2,]==max(table(gender_topics$gender,gender_topics[,i])[2,])))
-}
-gender_features[,1]=c("F","M")
+male <- gender_topics %>%
+    filter(gender == "M") %>%
+    melt(id="gender") %>%
+    mutate(gender = as.character(gender)) %>%
+    select(gender, value) 
+female <- gender_topics %>%
+    filter(gender == "F") %>%
+    melt(id="gender") %>%
+    mutate(gender = as.character(gender)) %>%
+    select(gender, value) 
+    
+gender_features[1,] <- c("F", levels(data$genre)[order(table(female),decreasing=TRUE)][1:5])
+gender_features[2,] <- c("M", levels(data$genre)[order(table(male),decreasing=TRUE)][1:5])
 
 gender_features<-as.data.frame(gender_features)
-colnames(gender_features) <-c("gender", paste0("topic",1:10))
+colnames(gender_features) <-c("gender", paste0("topic",1:5))
 
 write.csv(gender_features,"gender_features.csv",row.names=FALSE)
 
@@ -464,11 +485,11 @@ for(p in 1:8){
                     arrange(user_id)
                 
                 numerator = sim_zi[sort(neighbor_ind_r)] %*% (d_bh$rating-p_b_bar_filter$pbbar)
-                S_b[h] <- p_a_bar + numerator/sum(sim_u[neighbor_ind_zi])
+                S_b[h] <- p_a_bar + numerator/sum(sim_zi[neighbor_ind_zi])
             }
         }
         ind_r_zi <- sample_rating_zi$item_id
-        pred_r_zi <- S_b[ind_r]
+        pred_r_zi <- S_b[ind_r_zi]
         real_r_zi <- sample_rating_zi$rating
         #calculate mae
         mae_zi <- sum(abs(real_r_zi-pred_r_zi))/length(real_r_zi)
@@ -506,7 +527,8 @@ presim_data <- data %>%
 
 P_a_old <- presim_data %>%
     group_by(user_id) %>%
-    summarise(ave_rating = mean(presim_data$rating))
+    summarise(ave_rating = mean(presim_data$rating)) %>%
+    ungroup()
 
 
 # calculate p_b_bar for neighboring users
@@ -521,6 +543,7 @@ P_b_old <- data %>%
 # calculate S_old
 S_old <- matrix(ncol=dim(item_attr)[1],nrow=length(presim_old))
 
+sim_total <- read.csv("similarity_hybrid_final.csv")
 neighbor_ind_old <- matrix(ncol=K,nrow=length(presim_old))
 for (i in 1:length(presim_old)) {
     neighbor_ind_old[i,] <- order(sim_total[presim_old[i],],decreasing=TRUE)[1:K]
@@ -552,17 +575,235 @@ for (i in 1:length(presim_old)) {
     }
 }
 
-# Recommend 5 films for each user
+# Recommend 10+ films for each user
+item_uniq <- data %>%
+    select(item_id,movie_title) %>%
+    unique() %>%
+    arrange(item_id)
 movie_recommend <- list()
 for (i in 1:length(presim_old)) {
-    item_recommend <- which(S_old[i,] %in% sort(S_old[i,], decreasing=TRUE)[1:10])
+    rating_item_id<- data %>%
+        filter(user_id %in% presim_old[i]) %>%
+        select(user_id, rating,item_id) %>%
+        unique() %>%
+        select(item_id)
+    item_recommend <- which(S_old[i,] %in% sort(S_old[i,-rating_item_id$item_id], decreasing=TRUE)[1:10])
     movie_recommend[[i]] <- as.character(item_uniq$movie_title[item_uniq$item_id %in% item_recommend])
 }
  
 # predict for the new users
 
+set.seed(37)
+presim_new <- sample(1:length(user_demo$user_id),size=3)
+presim_new <- sort(presim_new)
+
+age_features <- read.csv("age_features.csv", colClasses="character")
+occupation_features <- read.csv("occupation_features.csv", colClasses="character")
+gender_features <- read.csv("gender_features.csv", colClasses="character")
+
+new_user <- data %>%
+    filter(user_id %in% presim_new) %>%
+    select(user_id, age, gender, occupation) %>%
+    unique()
+
+write.csv(new_user, "new_user.csv", row.names=FALSE)
+head(new_user)
+
+sim_zx <- matrix(ncol=dim(topic)[1],nrow=dim(new_user)[1])
+
+for (i in 1:dim(new_user)[1]) {
+    age_g <- age_group_det(new_user[i,]$age)
+    age_topic <- age_features %>%
+        filter(age==age_g)
+    gender_topic <- gender_features[gender_features$gender == as.character(new_user[i,]$gender),] 
+    occupation_topic <- occupation_features[occupation_features$occupation == as.character(new_user[i,]$occupation),] 
+    topics_new_user <- intersect(c(as.vector(as.matrix(age_topic[,c(-1,-12)])),as.vector(as.matrix(gender_topic[,-1]))),as.vector(as.matrix(occupation_topic[,-1])))
+    
+    for (j in 1:dim(sim_zx)[2]) {
+        if (j == i) {
+            sim_zx[i,j] = 0
+        } else {
+            neigh_user <- data %>%
+                select(user_id, age, gender, occupation) %>%
+                unique() %>%
+                arrange(user_id)
+            comb <- length(unique(unlist(unname(c(topics_new_user,topic[j,-1],new_user[i,-1],neigh_user[j,-1])))))
+            inters <- length(intersect(c(new_user[i,-1],as.vector(as.matrix(unname(topics_new_user)))),c(neigh_user[j,-1],as.vector(as.matrix(unname(topic[j,-1]))))))
+            sim_zx[i,j] <- inters/comb
+        }
+    }
+}
+
+S_new <- matrix(nrow=length(presim_new),ncol=dim(item_attr)[1])
+neighbor_ind<-matrix(nrow=length(presim_new),ncol=K)
+for(i in 1:length(presim_new)){
+    neighbor_ind[i,] <- order(sim_zx[i,],decreasing=TRUE)[1:K]
+}
+data$item_id<-as.numeric(data$movie_title)
+for(i in 1:length(presim_new)){
+    for (h in 1:dim(item_attr)[1]) {
+        d <- data %>%
+            filter(user_id %in% neighbor_ind[i,]) %>%
+            select(item_id, user_id, rating) %>%
+            unique()
+        # select id for neighboring users who have ratings for item h
+        neighbor_ind_r <- d %>% 
+            filter(item_id == h) %>%
+            select(user_id) %>%
+            unname() %>%
+            as.matrix() %>%
+            as.numeric()
+        if (length(neighbor_ind_r)==0) {
+            S_new[i,h] <- 0
+        } else {
+            # select p_b_h
+            d_bh <- d %>%
+                filter(user_id %in% neighbor_ind_r, item_id==h) %>%
+                arrange(user_id)
+            
+            userid<-as.numeric(d_bh$user_id)
+            
+            numerator = sim_zx[i,userid] %*% (d_bh$rating)
+            S_new[i,h] <-  numerator/sum(sim_zx[i,neighbor_ind[i,]])
+        }
+    }
+}
+write.csv(S_old,"rating_old.csv",row.names=FALSE)
+write.csv(S_new,"rating_new.csv",row.names=FALSE)
+
+# Recommend 10+ films for each user
+
+movie_recommend_new <- list()
+for (i in 1:length(presim_new)) {
+    rating_item_id<- data %>%
+        filter(user_id %in% presim_new[i]) %>%
+        select(user_id, rating,item_id, movie_title) %>%
+        unique() %>%
+        arrange(rating)
+    item_recommend <- which(S_new[i,] %in% sort(S_new[i,], decreasing=TRUE)[1:10])
+    movie_recommend[[i]] <- as.character(item_uniq$movie_title[item_uniq$item_id %in% item_recommend])
+}
+
+# Compare algorithms using MAE
+
+mae_sim_new <- matrix(nrow=3,ncol=2)
+mae_sim_new <- as.data.frame(mae_sim_new)
+colnames(mae_sim_new) <- c("user_id","mae")
+mae_sim_new$user_id <- presim_new
+for(i in 1:3){
+    sample_rating <- data %>%
+        filter(user_id == presim_new[i]) %>%
+        select(user_id, item_id, rating) %>%
+        unique()
+    ind_r <- sample_rating$item_id
+    pred_r < -S_a[i,ind_r]
+    real_r  <-sample_rating$rating
+    #calculate mae
+    mae = sum(abs(real_r-pred_r))/length(real_r)
+    mae_sim_new[i,2]=mae
+}
+write.csv(mae_sim_new,"mae_new.csv")
+
+pre_rating<-read.csv("rating_old.csv")
+mae_sim_old<-matrix(nrow=3,ncol=2)
+mae_sim_old<-as.data.frame(mae_sim_old)
+colnames(mae_sim_old)<-c("user_id","mae")
+mae_sim_old$user_id<-presim_old
+for(i in 1:3){
+    sample_rating <- data %>%
+        filter(user_id == presim_old[i]) %>%
+        select(user_id, item_id, rating) %>%
+        unique()
+    ind_r<-sample_rating$item_id
+    pred_r<-pre_rating[i,ind_r]
+    real_r<-sample_rating$rating
+    #calculate mae
+    mae=sum(abs(real_r-pred_r))/length(real_r)
+    mae_sim_old[i,2]=mae
+}
+write.csv(mae_sim_old,"mae_old.csv")
 
 
+mov<-read.csv("ratingMatrix.cs")
+rat<-read.csv("ratingMatrix.csv",header=TRUE)
+pre<- rat[presim_old,-1]
+for (i in 1:dim(pre)[1]){
+    for (j in 1:dim(pre)[2]){
+        if (is.na(pre[i,j]))
+            pre[i,j]=0
+    }
+}
+x<-colnames(rat)[-1]
+y<-x[order(x)]
+y<-read.csv("y.csv",colClasses ="character",header=TRUE)
+y[1644,2]<-as.character(ind[1,1])
+z<-y[,2]
+pre1<-pre[,order(x)]
+pre2<-pre1[,order(z)]
+x<-colnames(pre)
+ind <- data %>% 
+    select(movie_title,item_id) %>%
+    unique()
 
+mae_r<-matrix(nrow=3,ncol=2)
+mae_r<-as.data.frame(mae_r)
+colnames(mae_r)<-c("user_id","mae")
+mae_r$user_id<-presim_old
+for(i in 1:3){
+    sample_rating <- data %>%
+        filter(user_id == presim_old[i]) %>%
+        select(user_id, item_id, rating,movie_title) %>%
+        unique()
+    ind_r<-sample_rating$item_id
+    pred_r<-pre2[i,ind_r]
+    real_r<-sample_rating$rating
+    #calculate mae
+    mae=sum((real_r-pred_r)^2)/length(real_r)
+    mae_r[i,2]=mae
+}
+write.csv(mae_r,"mae_r.csv")
+mae_sim_old<-read.csv("mae_old.csv",header=T)[,-1]
+mae_r<-read.csv("mae_r.csv",header=T)[,-1]
+mae<-rbind(mae_sim_old,mae_r)
+mae$group<-c(rep("MAE_Hybrid",3),rep("MAE_UBCF",3))
+mae_r$maeh<-mae_sim_old$mae
+library(ggplot2)
+mae$user_id<-as.character(mae$user_id)
+a<-ggplot(mae,aes(x=user_id,y=MAE,fill=type))+geom_bar(stat="identity",position="dodge")
+ggsave("plot.png",width=5,height=5)
+
+mae_new<-read.csv("mae_new.csv",header=T)[,-1]
+colnames(mae_new)[2]<-"MAE"
+mae_new$user_id<-as.character(mae_new$user_id)
+b<-ggplot(mae_new,aes(x=user_id,y=MAE))+geom_bar(stat="identity",size=3,position="dodge")
+ggsave("plot1.png",width=5,height=5)
+
+mae_final <- read.csv("mae_test_final.csv")
+rnames <- mae_final[,1]
+mae_final <- mae_final[,-1]
+rownames(mae_final) <- rnames
+
+na_ind <- which(is.na(mae_final),arr.ind=TRUE)
+for (i in 1: dim(na_ind)[1]) {
+    mae_final[na_ind[i,1], na_ind[i,2]] <- 99
+}
+
+min_mae_test <- apply(mae_final,2, min)
+
+plot_mae_test <- data.frame(min_MAE=unname(min_mae_test))
+
+for(i in 1:length(min_mae_test)) {
+    ind <- which(mae_final == plot_mae_test$min_MAE[i], arr.ind=TRUE)
+    b <- as.character(rnames[ind[,1]])
+    a <- as.character(colnames(mae_final)[ind[,2]])
+    a_paste <- paste0("alpha=0.", unlist(strsplit(a, split=""))[length(unlist(strsplit(a, split="")))])
+    plot_mae_test$parameter[i] = paste0(a_paste, ",\n", b)
+}
+plot_mae_test$x <- seq(1,8)
+
+ggplot(plot_mae_test, aes(x=x,y=min_MAE)) +
+    geom_point(color="blue") +
+    geom_line() +
+    scale_x_continuous(limits=c(0.5,8.5), breaks=seq(1,8), labels=plot_mae_test$parameter)
 
 
